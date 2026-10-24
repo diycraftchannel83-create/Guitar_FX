@@ -40,6 +40,7 @@ class MainActivity : ComponentActivity() {
         window.navigationBarColor = bg
         window.decorView.systemUiVisibility = 0
         engine = GuitarAudioEngine(this)
+        engine.enabledEffects = active.toSet()
         buildUi()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 42)
@@ -154,7 +155,7 @@ class MainActivity : ComponentActivity() {
                 isFocusable = true
             }
             val knob = TextView(this).apply {
-                text = if (on) "●" else "●"
+                text = "●"
                 textSize = 25f
                 gravity = Gravity.CENTER
                 setTextColor(if (on) lime else Color.rgb(221, 226, 233))
@@ -165,6 +166,7 @@ class MainActivity : ComponentActivity() {
             card.addView(text(if (on) "ON" else "ON / OFF", 11f, if (on) bg else Color.rgb(225, 228, 233)))
             card.setOnClickListener {
                 if (active.contains(key)) active.remove(key) else active.add(key)
+                engine.enabledEffects = active.toSet()
                 if (key == "OVERDRIVE") {
                     drive = if (active.contains(key)) 2.0f else 1.0f
                     engine.drive = drive
@@ -222,7 +224,7 @@ class MainActivity : ComponentActivity() {
         root.addView(label("Wired earphones recommended. Bluetooth can introduce noticeable latency.", 11f).apply {
             setPadding(2, dp(12), 2, dp(2))
         })
-        root.addView(label("Prototype: live input and drive processing. Amp simulation, cabinet IR, chorus and delay are visual controls only until implemented.", 10f, Color.GRAY))
+        root.addView(label("Live DSP: noise gate, overdrive, amp tone, cabinet-style filter, chorus and delay. CAB IR uses a tone filter, not a measured impulse response.", 10f, Color.GRAY))
         setContentView(scroll)
     }
 
