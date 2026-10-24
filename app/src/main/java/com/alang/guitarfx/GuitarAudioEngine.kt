@@ -18,6 +18,10 @@ import kotlin.math.tanh
 class GuitarAudioEngine(private val context: Context) {
     @Volatile var drive: Float = 2.0f
     @Volatile var outputLevel: Float = 0.75f
+    @Volatile var inputLevel: Float = 0.0f
+        private set
+    @Volatile var peakLevel: Float = 0.0f
+        private set
     @Volatile var enabledEffects: Set<String> = setOf("OVERDRIVE")
     @Volatile var isRunning: Boolean = false
         private set
@@ -86,11 +90,15 @@ class GuitarAudioEngine(private val context: Context) {
         val pcm = ShortArray(256)
         val delayBuffer = FloatArray(sampleRate * 2)
         val chorusBuffer = FloatArray(sampleRate)
+        val flangerBuffer = FloatArray((sampleRate * 0.03).toInt())
         var delayPos = 0
         var chorusPos = 0
+        var flangerPos = 0
         var phase = 0.0
+        var flangerPhase = 0.0
         var lowPass = 0.0
         var envelope = 0.0
+        var bassLow = 0.0
         while (isRunning && !Thread.currentThread().isInterrupted) {
             val count = input.read(pcm, 0, pcm.size, AudioRecord.READ_BLOCKING)
             // A negative read result indicates an audio I/O failure. Exit instead of
@@ -100,10 +108,15 @@ class GuitarAudioEngine(private val context: Context) {
                 break
             }
             if (count == 0) continue
+            var blockPeak = 0.0
+            var blockSum = 0.0
             val effects = enabledEffects
             val driveGain = drive.coerceIn(1.0f, 8.0f).toDouble()
             for (i in 0 until count) {
                 var x = pcm[i] / 32768.0
+                val dryInput = abs(x)
+                if (dryInput > blockPeak) blockPeak = dryInput
+                blockSum += x * x
                 envelope = envelope * 0.995 + abs(x) * 0.005
                 if ("NOISE GATE" in effects && envelope < 0.012) x *= (envelope / 0.012).coerceIn(0.0, 1.0)
                 if ("OVERDRIVE" in effects) x = tanh(x * driveGain) / tanh(driveGain)
@@ -116,6 +129,24 @@ class GuitarAudioEngine(private val context: Context) {
                     // Cabinet-style high-frequency roll-off; not a true IR convolution.
                     lowPass += 0.10 * (x - lowPass)
                     x = lowPass
+                }
+                if ("FLANGER" in effects) {
+                    // Short modulated delay with feedback for the sweeping Cure-style flange.
+                    val lfo = (sin(flangerPhase) + 1.0) * 0.5
+                    val delaySamples = (2.0 + lfo * 7.0).toInt().coerceIn(1, flangerBuffer.size - 1)
+                    val readPos = (flangerPos - delaySamples + flangerBuffer.size) % flangerBuffer.size
+                    val delayed = flangerBuffer[readPos].toDouble()
+                    flangerBuffer[flangerPos] = (x + delayed * 0.55).toFloat()
+                    x = x * 0.58 + delayed * 0.62
+                    flangerPos = (flangerPos + 1) % flangerBuffer.size
+                    flangerPhase += 2.0 * Math.PI * 0.22 / sampleRate
+                    if (flangerPhase > 2.0 * Math.PI) flangerPhase -= 2.0 * Math.PI
+                }
+                if ("BASS PRESET" in effects) {
+                    // Warm, rounded bass voicing inspired by post-punk bass tones.
+                    bassLow += 0.075 * (x - bassLow)
+                    x = bassLow * 1.18 + (x - bassLow) * 0.42
+                    x = tanh(x * 1.18)
                 }
                 if ("CHORUS" in effects) {
                     val lfo = (sin(phase) + 1.0) * 0.5
@@ -139,6 +170,8 @@ class GuitarAudioEngine(private val context: Context) {
                 x *= outputLevel.coerceIn(0.0f, 1.0f)
                 pcm[i] = (x * 32767.0).toInt().coerceIn(-32768, 32767).toShort()
             }
+            inputLevel = kotlin.math.sqrt(blockSum / count).toFloat().coerceIn(0f, 1f)
+            peakLevel = blockPeak.toFloat().coerceIn(0f, 1f)
             var written = 0
             while (written < count && isRunning) {
                 val n = output.write(pcm, written, count - written, AudioTrack.WRITE_BLOCKING)
