@@ -123,6 +123,16 @@ class GuitarAudioEngine(private val context: Context) {
                 envelope = envelope * 0.995 + abs(x) * 0.005
                 if ("NOISE GATE" in effects && envelope < 0.012) x *= (envelope / 0.012).coerceIn(0.0, 1.0)
                 if ("OVERDRIVE" in effects) x = tanh(x * driveGain) / tanh(driveGain)
+                if ("MUSE ROCK DISTORTION" in effects) {
+                    // High-gain, mid-forward modern alternative-rock voicing.
+                    // Asymmetric clipping adds bite while a small low-end trim keeps chords defined.
+                    val tightened = x * 0.88
+                    val hot = tightened * 5.2
+                    val clipped = tanh(hot) * 0.78 + tanh(hot * 0.55 + 0.12) * 0.22
+                    x = clipped * 1.05
+                    lowPass += 0.22 * (x - lowPass)
+                    x = lowPass * 0.72 + x * 0.28
+                }
                 if ("AMP SIM" in effects) {
                     x = tanh(x * 2.6)
                     lowPass += 0.16 * (x - lowPass)
