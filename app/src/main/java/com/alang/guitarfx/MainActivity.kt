@@ -6,6 +6,8 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -25,6 +27,29 @@ class MainActivity : ComponentActivity() {
     private lateinit var startButton: Button
     private lateinit var outputValue: TextView
     private lateinit var outputSeek: SeekBar
+    private lateinit var meterText: TextView
+    private val meterBars = mutableListOf<View>()
+    private val meterHandler = Handler(Looper.getMainLooper())
+    private val meterUpdater = object : Runnable {
+        override fun run() {
+            if (!::engine.isInitialized || !::meterText.isInitialized) return
+            val level = engine.inputLevel
+            val peak = engine.peakLevel
+            meterText.text = if (engine.isRunning) "RMS ${(level * 100).toInt()}%  •  PEAK ${(peak * 100).toInt()}%"
+                else "NO LIVE SIGNAL"
+            val lit = (peak * meterBars.size * 1.8f).toInt().coerceIn(0, meterBars.size)
+            meterBars.forEachIndexed { index, bar ->
+                val color = when {
+                    index < lit && index >= 17 -> Color.rgb(255, 75, 75)
+                    index < lit && index >= 13 -> Color.rgb(255, 185, 55)
+                    index < lit -> lime
+                    else -> Color.rgb(70, 75, 83)
+                }
+                bar.background = shape(color, 8f)
+            }
+            meterHandler.postDelayed(this, 80)
+        }
+    }
     private val active = mutableSetOf("OVERDRIVE")
     private var drive = 2.0f
     private var master = 75
@@ -41,6 +66,7 @@ class MainActivity : ComponentActivity() {
         engine = GuitarAudioEngine(this)
         engine.enabledEffects = active.toSet()
         buildUi()
+        meterHandler.post(meterUpdater)
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 42)
         }
@@ -69,6 +95,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun buildUi() {
+        meterBars.clear()
         val scroll = ScrollView(this).apply { setBackgroundColor(bg); clipToPadding = false }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -123,13 +150,15 @@ class MainActivity : ComponentActivity() {
         meterCard.addView(meterHead)
         val bars = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         for (i in 0 until 20) {
-            val bar = View(this).apply { background = shape(if (i < 12) lime else Color.rgb(70, 75, 83), 8f) }
+            val bar = View(this).apply { background = shape(Color.rgb(70, 75, 83), 8f) }
+            meterBars.add(bar)
             bars.addView(bar, LinearLayout.LayoutParams(0, dp(if (i % 4 == 0) 29 else 19), 1f).apply {
                 leftMargin = dp(2); rightMargin = dp(2)
             })
         }
         meterCard.addView(bars, LinearLayout.LayoutParams(-1, dp(40)))
-        meterCard.addView(label("Illustrative meter — actual level depends on the audio input.", 11f))
+        meterText = label("NO LIVE SIGNAL  •  Start audio to measure input", 11f, lime, true)
+        meterCard.addView(meterText)
         root.addView(meterCard, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             topMargin = dp(14); bottomMargin = dp(18)
         })
@@ -142,7 +171,9 @@ class MainActivity : ComponentActivity() {
             Triple("AMP SIM", "AMP SIM", Color.rgb(74, 75, 103)),
             Triple("CAB IR", "CAB IR", Color.rgb(66, 72, 80)),
             Triple("CHORUS", "CHORUS", Color.rgb(73, 101, 123)),
-            Triple("DELAY", "DELAY", Color.rgb(117, 89, 58))
+            Triple("DELAY", "DELAY", Color.rgb(117, 89, 58)),
+            Triple("FLANGER", "FLANGER", Color.rgb(102, 65, 125)),
+            Triple("SIMON GALLOP BASS", "BASS PRESET", Color.rgb(54, 91, 83))
         )
         pedals.forEach { (title, key, color) ->
             val on = active.contains(key)
@@ -222,7 +253,7 @@ class MainActivity : ComponentActivity() {
         root.addView(label("Wired earphones recommended. Bluetooth can introduce noticeable latency.", 11f).apply {
             setPadding(2, dp(12), 2, dp(2))
         })
-        root.addView(label("Live DSP: noise gate, overdrive, amp tone, cabinet-style filter, chorus and delay. CAB IR uses a tone filter, not a measured impulse response.", 10f, Color.GRAY))
+        root.addView(label("Live DSP: noise gate, overdrive, amp tone, cabinet-style filter, chorus, flanger, delay and post-punk bass voicing. CAB IR is a tone filter, not a measured impulse response.", 10f, Color.GRAY))
         setContentView(scroll)
     }
 
@@ -242,6 +273,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        meterHandler.removeCallbacks(meterUpdater)
         engine.stop()
         super.onDestroy()
     }
