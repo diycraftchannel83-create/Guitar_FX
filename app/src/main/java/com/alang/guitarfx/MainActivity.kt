@@ -170,7 +170,6 @@ class MainActivity : ComponentActivity() {
                 if (key == "OVERDRIVE") {
                     drive = if (active.contains(key)) 2.0f else 1.0f
                     engine.drive = drive
-                    driveValue.text = "Drive amount: %.1fx".format(drive)
                 }
                 buildUi()
             }
