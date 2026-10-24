@@ -7,14 +7,18 @@ import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.os.Process
+import kotlin.math.abs
+import kotlin.math.sin
 import kotlin.math.tanh
 
 /**
- * Minimal PCM streaming prototype. Actual analogue iRig routing must be verified on-device.
+ * Realtime PCM effects prototype. CAB IR currently uses a cabinet-style tone filter,
+ * not a measured impulse-response convolution.
  */
 class GuitarAudioEngine(private val context: Context) {
     @Volatile var drive: Float = 2.0f
     @Volatile var outputLevel: Float = 0.75f
+    @Volatile var enabledEffects: Set<String> = setOf("OVERDRIVE")
     @Volatile var isRunning: Boolean = false
         private set
 
@@ -33,7 +37,7 @@ class GuitarAudioEngine(private val context: Context) {
             val minOut = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
             if (minIn <= 0 || minOut <= 0) return "This device does not support the requested PCM format"
             val bufferSize = maxOf(minIn, minOut, 2048) * 2
-            val input = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, sampleRate,
+            val input = AudioRecord(MediaRecorder.AudioSource.UNPROCESSED, sampleRate,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferSize)
             if (input.state != AudioRecord.STATE_INITIALIZED) {
                 input.release()
@@ -74,14 +78,56 @@ class GuitarAudioEngine(private val context: Context) {
     private fun processLoop(input: AudioRecord, output: AudioTrack) {
         Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
         val pcm = ShortArray(256)
+        val delayBuffer = FloatArray(sampleRate * 2)
+        val chorusBuffer = FloatArray(sampleRate)
+        var delayPos = 0
+        var chorusPos = 0
+        var phase = 0.0
+        var lowPass = 0.0
+        var previousInput = 0.0
+        var envelope = 0.0
         while (isRunning && !Thread.currentThread().isInterrupted) {
             val count = input.read(pcm, 0, pcm.size, AudioRecord.READ_BLOCKING)
             if (count <= 0) continue
-            val gain = drive.coerceIn(1.0f, 8.0f)
+            val effects = enabledEffects
+            val driveGain = drive.coerceIn(1.0f, 8.0f).toDouble()
             for (i in 0 until count) {
-                val normalized = pcm[i] / 32768.0
-                val shaped = tanh(normalized * gain) / tanh(gain.toDouble())
-                pcm[i] = (shaped * outputLevel.coerceIn(0.0f, 1.0f) * 32767.0).toInt().coerceIn(-32768, 32767).toShort()
+                var x = pcm[i] / 32768.0
+                envelope = envelope * 0.995 + abs(x) * 0.005
+                if ("NOISE GATE" in effects && envelope < 0.012) x *= (envelope / 0.012).coerceIn(0.0, 1.0)
+                if ("OVERDRIVE" in effects) x = tanh(x * driveGain) / tanh(driveGain)
+                if ("AMP SIM" in effects) {
+                    x = tanh(x * 2.6)
+                    lowPass += 0.16 * (x - lowPass)
+                    x = lowPass * 0.82 + x * 0.18
+                }
+                if ("CAB IR" in effects) {
+                    // Cabinet-style high-frequency roll-off; not a true IR convolution.
+                    lowPass += 0.10 * (x - lowPass)
+                    x = lowPass
+                }
+                if ("CHORUS" in effects) {
+                    val lfo = (sin(phase) + 1.0) * 0.5
+                    val delaySamples = (18.0 + lfo * 18.0).toInt()
+                    val readPos = (chorusPos - delaySamples + chorusBuffer.size) % chorusBuffer.size
+                    val delayed = chorusBuffer[readPos]
+                    chorusBuffer[chorusPos] = x.toFloat()
+                    x = x * 0.72 + delayed * 0.28
+                    chorusPos = (chorusPos + 1) % chorusBuffer.size
+                    phase += 2.0 * Math.PI * 0.8 / sampleRate
+                    if (phase > 2.0 * Math.PI) phase -= 2.0 * Math.PI
+                }
+                if ("DELAY" in effects) {
+                    val delaySamples = (sampleRate * 0.28).toInt()
+                    val readPos = (delayPos - delaySamples + delayBuffer.size) % delayBuffer.size
+                    val echo = delayBuffer[readPos]
+                    delayBuffer[delayPos] = (x + echo * 0.38).toFloat()
+                    x += echo * 0.35
+                    delayPos = (delayPos + 1) % delayBuffer.size
+                }
+                x *= outputLevel.coerceIn(0.0f, 1.0f)
+                pcm[i] = (x * 32767.0).toInt().coerceIn(-32768, 32767).toShort()
+                previousInput = x
             }
             var written = 0
             while (written < count && isRunning) {
