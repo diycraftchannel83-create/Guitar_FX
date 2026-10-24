@@ -7,6 +7,12 @@ import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.os.Process
+import com.naman14.androidlame.AndroidLame
+import com.naman14.androidlame.LameBuilder
+import java.io.File
+import java.io.FileOutputStream
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.sin
 import kotlin.math.tanh
@@ -30,6 +36,76 @@ class GuitarAudioEngine(private val context: Context) {
     private var track: AudioTrack? = null
     private var worker: Thread? = null
     private val sampleRate = 48000
+    @Volatile private var recordingActive = false
+    @Volatile var recordingError: String? = null
+        private set
+    private var recordingQueue: ArrayBlockingQueue<ShortArray>? = null
+    private var recordingThread: Thread? = null
+    private var recordingFile: File? = null
+
+    @Synchronized
+    fun startRecording(): String {
+        if (!isRunning) return "Start audio before recording"
+        if (recordingActive) return "Recording is already active"
+        return try {
+            val file = File(context.cacheDir, "guitarfx_recording_${System.currentTimeMillis()}.mp3")
+            val queue = ArrayBlockingQueue<ShortArray>(64)
+            recordingFile = file
+            recordingQueue = queue
+            recordingError = null
+            recordingActive = true
+            recordingThread = Thread({
+                var encoder: AndroidLame? = null
+                try {
+                    encoder = LameBuilder()
+                        .setInSampleRate(sampleRate)
+                        .setOutSampleRate(sampleRate)
+                        .setOutChannels(1)
+                        .setOutBitrate(192)
+                        .setMode(LameBuilder.Mode.MONO)
+                        .setQuality(5)
+                        .build()
+                    FileOutputStream(file).use { stream ->
+                        val mp3Buffer = ByteArray(8192)
+                        while (recordingActive || queue.isNotEmpty()) {
+                            val block = queue.poll(100, TimeUnit.MILLISECONDS) ?: continue
+                            val bytes = encoder.encodeBufferInterLeaved(block, block.size, mp3Buffer)
+                            if (bytes > 0) stream.write(mp3Buffer, 0, bytes)
+                        }
+                        val flushed = encoder.flush(mp3Buffer)
+                        if (flushed > 0) stream.write(mp3Buffer, 0, flushed)
+                        stream.flush()
+                    }
+                } catch (e: Exception) {
+                    recordingError = e.message ?: e.javaClass.simpleName
+                } finally {
+                    try { encoder?.close() } catch (_: Exception) { }
+                }
+            }, "GuitarFX-MP3-Encoder").apply {
+                priority = Thread.NORM_PRIORITY
+                start()
+            }
+            "Recording processed guitar audio to MP3"
+        } catch (e: Exception) {
+            recordingActive = false
+            recordingQueue = null
+            recordingThread = null
+            recordingFile = null
+            "Could not start recording: ${e.javaClass.simpleName}"
+        }
+    }
+
+    @Synchronized
+    fun stopRecording(): File? {
+        if (!recordingActive && recordingThread == null) return null
+        recordingActive = false
+        try { recordingThread?.join(5000) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
+        val finished = recordingFile
+        recordingQueue = null
+        recordingThread = null
+        recordingFile = null
+        return if (recordingError == null && finished?.exists() == true && finished.length() > 0) finished else null
+    }
 
     @Synchronized
     fun start(): String {
@@ -185,6 +261,9 @@ class GuitarAudioEngine(private val context: Context) {
             }
             inputLevel = kotlin.math.sqrt(blockSum / count).toFloat().coerceIn(0f, 1f)
             peakLevel = blockPeak.toFloat().coerceIn(0f, 1f)
+            // Record the processed (wet) signal on a separate thread so MP3 encoding
+            // does not block the real-time audio path.
+            if (recordingActive) recordingQueue?.offer(pcm.copyOf(count))
             var written = 0
             while (written < count && isRunning) {
                 val n = output.write(pcm, written, count - written, AudioTrack.WRITE_BLOCKING)
@@ -196,6 +275,7 @@ class GuitarAudioEngine(private val context: Context) {
 
     @Synchronized
     fun stop() {
+        stopRecording()
         isRunning = false
         try { recorder?.stop() } catch (_: Exception) { }
         try { track?.pause(); track?.flush(); track?.stop() } catch (_: Exception) { }
