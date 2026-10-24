@@ -37,12 +37,13 @@ class GuitarAudioEngine(private val context: Context) {
             val minOut = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
             if (minIn <= 0 || minOut <= 0) return "This device does not support the requested PCM format"
             val bufferSize = maxOf(minIn, minOut, 2048) * 2
-            val input = AudioRecord(if (android.os.Build.VERSION.SDK_INT >= 24) MediaRecorder.AudioSource.UNPROCESSED else MediaRecorder.AudioSource.VOICE_RECOGNITION, sampleRate,
+            val input = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, sampleRate,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferSize)
             if (input.state != AudioRecord.STATE_INITIALIZED) {
                 input.release()
                 return "Audio input could not initialise. Check iRig/headset connection."
             }
+            recorder = input
             val output = AudioTrack.Builder()
                 .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
@@ -56,7 +57,6 @@ class GuitarAudioEngine(private val context: Context) {
                 output.release()
                 return "Audio output could not initialise"
             }
-            recorder = input
             track = output
             input.startRecording()
             output.play()
@@ -90,7 +90,6 @@ class GuitarAudioEngine(private val context: Context) {
         var chorusPos = 0
         var phase = 0.0
         var lowPass = 0.0
-        var previousInput = 0.0
         var envelope = 0.0
         while (isRunning && !Thread.currentThread().isInterrupted) {
             val count = input.read(pcm, 0, pcm.size, AudioRecord.READ_BLOCKING)
@@ -133,7 +132,6 @@ class GuitarAudioEngine(private val context: Context) {
                 }
                 x *= outputLevel.coerceIn(0.0f, 1.0f)
                 pcm[i] = (x * 32767.0).toInt().coerceIn(-32768, 32767).toShort()
-                previousInput = x
             }
             var written = 0
             while (written < count && isRunning) {
