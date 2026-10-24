@@ -17,17 +17,17 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - name: Set up Android SDK tools
-        uses: android-actions/setup-android@v3
       - name: Install Android SDK packages
         shell: bash
         run: |
-          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
           if [ -z "$SDKMANAGER" ]; then
-            echo "sdkmanager was not found under ANDROID_HOME=$ANDROID_HOME"
+            echo "sdkmanager was not found under $ANDROID_HOME/cmdline-tools"
             exit 1
           fi
-          yes | "$SDKMANAGER" --licenses || true
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
