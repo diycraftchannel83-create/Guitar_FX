@@ -2,6 +2,18 @@ package com.alang.guitarfx
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.ContentValues
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import android.text.InputType
+import android.widget.EditText
+import android.widget.Toast
+import android.app.AlertDialog
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -25,6 +37,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var engine: GuitarAudioEngine
     private lateinit var status: TextView
     private lateinit var startButton: Button
+    private lateinit var recordButton: Button
+    private var recordingUiActive = false
     private lateinit var outputValue: TextView
     private lateinit var outputSeek: SeekBar
     private lateinit var meterText: TextView
@@ -67,8 +81,12 @@ class MainActivity : ComponentActivity() {
         engine.enabledEffects = active.toSet()
         buildUi()
         meterHandler.post(meterUpdater)
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 42)
+        val needed = mutableListOf(Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT <= 28 && ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            needed.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+        if (needed.any { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }) {
+            ActivityCompat.requestPermissions(this, needed.toTypedArray(), 42)
         }
     }
 
@@ -250,12 +268,105 @@ class MainActivity : ComponentActivity() {
         }
         buttons.addView(startButton, LinearLayout.LayoutParams(0, dp(62), 1f).apply { leftMargin = dp(6) })
         masterCard.addView(buttons)
+        recordButton = Button(this).apply {
+            text = if (recordingUiActive) "■  FINISH RECORDING" else "●  RECORD MP3"
+            isAllCaps = false
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            background = shape(Color.rgb(176, 48, 58), 16f)
+            setOnClickListener { toggleRecording() }
+        }
+        masterCard.addView(recordButton, LinearLayout.LayoutParams(-1, dp(56)).apply { topMargin = dp(10) })
         root.addView(masterCard)
         root.addView(label("Wired earphones recommended. Bluetooth can introduce noticeable latency.", 11f).apply {
             setPadding(2, dp(12), 2, dp(2))
         })
         root.addView(label("Live DSP: overdrive, high-gain modern rock distortion, amp tone, cabinet-style filter, chorus, flanger, delay and post-punk bass voicing. CAB IR is a tone filter, not a measured impulse response.", 10f, Color.GRAY))
         setContentView(scroll)
+    }
+
+    private fun toggleRecording() {
+        if (!engine.isRunning) {
+            status.text = "Start audio before recording"
+            Toast.makeText(this, "Start audio first, then press Record MP3.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!recordingUiActive) {
+            status.text = engine.startRecording()
+            recordingUiActive = engine.recordingError == null && status.text.toString().contains("Recording processed")
+            recordButton.text = if (recordingUiActive) "■  FINISH RECORDING" else "●  RECORD MP3"
+        } else {
+            val finished = engine.stopRecording()
+            recordingUiActive = false
+            recordButton.text = "●  RECORD MP3"
+            if (finished == null) {
+                status.text = "MP3 recording failed: ${engine.recordingError ?: "no audio data"}"
+                Toast.makeText(this, status.text, Toast.LENGTH_LONG).show()
+            } else {
+                status.text = "Recording finished — choose MP3 filename"
+                askRecordingName(finished)
+            }
+        }
+    }
+
+    private fun askRecordingName(tempFile: File) {
+        val input = EditText(this).apply {
+            hint = "Enter recording name"
+            inputType = InputType.TYPE_CLASS_TEXT
+            setSingleLine(true)
+            setText("GuitarFX_${java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())}")
+            setSelection(text.length)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Save MP3 recording")
+            .setMessage("Folder: Music/audio/guitar_fx")
+            .setView(input)
+            .setNegativeButton("Cancel") { _, _ -> tempFile.delete(); status.text = "Recording discarded" }
+            .setPositiveButton("Save") { _, _ ->
+                val rawName = input.text.toString().trim()
+                val safeName = rawName.replace(Regex("[^A-Za-z0-9 _-]"), "").trim().ifBlank { "GuitarFX_Recording" }
+                saveRecording(tempFile, safeName)
+            }
+            .setOnCancelListener { tempFile.delete(); status.text = "Recording discarded" }
+            .show()
+    }
+
+    private fun saveRecording(tempFile: File, name: String) {
+        val filename = if (name.lowercase(java.util.Locale.ROOT).endsWith(".mp3")) name else "$name.mp3"
+        try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Audio.Media.DISPLAY_NAME, filename)
+                    put(MediaStore.Audio.Media.MIME_TYPE, "audio/mpeg")
+                    put(MediaStore.Audio.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MUSIC}/audio/guitar_fx")
+                    put(MediaStore.Audio.Media.IS_PENDING, 1)
+                }
+                val uri = contentResolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
+                    ?: throw IllegalStateException("Could not create MP3 media entry")
+                try {
+                    contentResolver.openOutputStream(uri)?.use { output ->
+                        FileInputStream(tempFile).use { it.copyTo(output) }
+                    } ?: throw IllegalStateException("Could not open output file")
+                    values.clear()
+                    values.put(MediaStore.Audio.Media.IS_PENDING, 0)
+                    contentResolver.update(uri, values, null, null)
+                } catch (e: Exception) {
+                    contentResolver.delete(uri, null, null)
+                    throw e
+                }
+            } else {
+                val folder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "audio/guitar_fx")
+                if (!folder.exists() && !folder.mkdirs()) throw IllegalStateException("Could not create output folder")
+                val destination = File(folder, filename)
+                FileInputStream(tempFile).use { input -> FileOutputStream(destination).use { output -> input.copyTo(output) } }
+            }
+            tempFile.delete()
+            status.text = "Saved: Music/audio/guitar_fx/$filename"
+            Toast.makeText(this, "Saved MP3: Music/audio/guitar_fx/$filename", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            status.text = "Save failed: ${e.message ?: e.javaClass.simpleName}"
+            Toast.makeText(this, status.text, Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun toggleAudio() {
