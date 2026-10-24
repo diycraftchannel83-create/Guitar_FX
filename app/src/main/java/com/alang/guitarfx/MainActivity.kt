@@ -375,9 +375,16 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (engine.isRunning) {
+            if (recordingUiActive) {
+                val finished = engine.stopRecording()
+                recordingUiActive = false
+                if (finished != null) askRecordingName(finished)
+                else status.text = "Recording ended: ${engine.recordingError ?: "no audio data"}"
+                if (::recordButton.isInitialized) recordButton.text = "●  RECORD MP3"
+            }
             engine.stop()
             startButton.text = "⏻  START AUDIO"
-            status.text = "Audio stopped"
+            if (status.text.toString().startsWith("READY") || status.text.toString().startsWith("Recording ended")) status.text = "Audio stopped"
         } else {
             status.text = engine.start()
             startButton.text = if (engine.isRunning) "■  STOP AUDIO" else "⏻  START AUDIO"
