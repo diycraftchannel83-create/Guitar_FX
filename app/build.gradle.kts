@@ -21,4 +21,5 @@ android {
 dependencies {
     implementation("androidx.activity:activity-ktx:1.9.3")
     implementation("androidx.core:core-ktx:1.15.0")
+    implementation("com.github.naman14:TAndroidLame:1.1")
 }
