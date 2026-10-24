@@ -29,7 +29,7 @@ class GuitarAudioEngine(private val context: Context) {
     private var recorder: AudioRecord? = null
     private var track: AudioTrack? = null
     private var worker: Thread? = null
-    private val sampleRate = 44100
+    private val sampleRate = 48000
 
     @Synchronized
     fun start(): String {
@@ -40,7 +40,8 @@ class GuitarAudioEngine(private val context: Context) {
             val minIn = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
             val minOut = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
             if (minIn <= 0 || minOut <= 0) return "This device does not support the requested PCM format"
-            val bufferSize = maxOf(minIn, minOut, 2048) * 2
+            // Keep buffers close to the platform minimum to reduce round-trip latency.
+            val bufferSize = maxOf(minIn, minOut, 1024)
             val input = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, sampleRate,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferSize)
             if (input.state != AudioRecord.STATE_INITIALIZED) {
@@ -53,7 +54,8 @@ class GuitarAudioEngine(private val context: Context) {
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
                 .setAudioFormat(AudioFormat.Builder().setSampleRate(sampleRate)
                     .setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-                .setBufferSizeInBytes(bufferSize)
+                 .setBufferSizeInBytes(maxOf(minOut, 2048))
+                .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
             if (output.state != AudioTrack.STATE_INITIALIZED) {
@@ -87,7 +89,8 @@ class GuitarAudioEngine(private val context: Context) {
 
     private fun processLoop(input: AudioRecord, output: AudioTrack) {
         Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
-        val pcm = ShortArray(256)
+        // 128 frames at 48 kHz is about 2.7 ms per processing block.
+        val pcm = ShortArray(128)
         val delayBuffer = FloatArray(sampleRate * 2)
         val chorusBuffer = FloatArray(sampleRate)
         val flangerBuffer = FloatArray((sampleRate * 0.03).toInt())
