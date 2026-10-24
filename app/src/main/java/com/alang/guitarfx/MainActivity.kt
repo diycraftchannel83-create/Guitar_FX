@@ -168,6 +168,7 @@ class MainActivity : ComponentActivity() {
         val pedals = listOf(
             Triple("NOISE GATE", "NOISE GATE", Color.rgb(61, 91, 99)),
             Triple("OVERDRIVE", "OVERDRIVE", lime),
+            Triple("MUSE ROCK DIST", "MUSE ROCK DISTORTION", Color.rgb(188, 66, 70)),
             Triple("AMP SIM", "AMP SIM", Color.rgb(74, 75, 103)),
             Triple("CAB IR", "CAB IR", Color.rgb(66, 72, 80)),
             Triple("CHORUS", "CHORUS", Color.rgb(73, 101, 123)),
@@ -253,7 +254,7 @@ class MainActivity : ComponentActivity() {
         root.addView(label("Wired earphones recommended. Bluetooth can introduce noticeable latency.", 11f).apply {
             setPadding(2, dp(12), 2, dp(2))
         })
-        root.addView(label("Live DSP: noise gate, overdrive, amp tone, cabinet-style filter, chorus, flanger, delay and post-punk bass voicing. CAB IR is a tone filter, not a measured impulse response.", 10f, Color.GRAY))
+        root.addView(label("Live DSP: overdrive, high-gain modern rock distortion, amp tone, cabinet-style filter, chorus, flanger, delay and post-punk bass voicing. CAB IR is a tone filter, not a measured impulse response.", 10f, Color.GRAY))
         setContentView(scroll)
     }
 
