@@ -14,6 +14,7 @@ import kotlin.math.tanh
  */
 class GuitarAudioEngine(private val context: Context) {
     @Volatile var drive: Float = 2.0f
+    @Volatile var outputLevel: Float = 0.75f
     @Volatile var isRunning: Boolean = false
         private set
 
@@ -80,7 +81,7 @@ class GuitarAudioEngine(private val context: Context) {
             for (i in 0 until count) {
                 val normalized = pcm[i] / 32768.0
                 val shaped = tanh(normalized * gain) / tanh(gain.toDouble())
-                pcm[i] = (shaped * 32767.0).toInt().coerceIn(-32768, 32767).toShort()
+                pcm[i] = (shaped * outputLevel.coerceIn(0.0f, 1.0f) * 32767.0).toInt().coerceIn(-32768, 32767).toShort()
             }
             var written = 0
             while (written < count && isRunning) {
