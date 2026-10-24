@@ -57,7 +57,7 @@ class GuitarAudioEngine(private val context: Context) {
             recordingThread = Thread({
                 var encoder: AndroidLame? = null
                 try {
-                    encoder = LameBuilder()
+                    val lame = LameBuilder()
                         .setInSampleRate(sampleRate)
                         .setOutSampleRate(sampleRate)
                         .setOutChannels(1)
@@ -65,14 +65,15 @@ class GuitarAudioEngine(private val context: Context) {
                         .setMode(LameBuilder.Mode.MONO)
                         .setQuality(5)
                         .build()
+                    encoder = lame
                     FileOutputStream(file).use { stream ->
                         val mp3Buffer = ByteArray(8192)
                         while (recordingActive || queue.isNotEmpty()) {
                             val block = queue.poll(100, TimeUnit.MILLISECONDS) ?: continue
-                            val bytes = encoder.encodeBufferInterLeaved(block, block.size, mp3Buffer)
+                            val bytes = lame.encodeBufferInterLeaved(block, block.size, mp3Buffer)
                             if (bytes > 0) stream.write(mp3Buffer, 0, bytes)
                         }
-                        val flushed = encoder.flush(mp3Buffer)
+                        val flushed = lame.flush(mp3Buffer)
                         if (flushed > 0) stream.write(mp3Buffer, 0, flushed)
                         stream.flush()
                     }
