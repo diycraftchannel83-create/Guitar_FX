@@ -49,7 +49,7 @@ class GuitarAudioEngine(private val context: Context) {
         if (recordingActive) return "Recording is already active"
         return try {
             val file = File(context.cacheDir, "guitarfx_recording_${System.currentTimeMillis()}.mp3")
-            val queue = ArrayBlockingQueue<ShortArray>(64)
+            val queue = ArrayBlockingQueue<ShortArray>(512)
             recordingFile = file
             recordingQueue = queue
             recordingError = null
@@ -262,14 +262,23 @@ class GuitarAudioEngine(private val context: Context) {
             }
             inputLevel = kotlin.math.sqrt(blockSum / count).toFloat().coerceIn(0f, 1f)
             peakLevel = blockPeak.toFloat().coerceIn(0f, 1f)
-            // Record the processed (wet) signal on a separate thread so MP3 encoding
-            // does not block the real-time audio path.
-            if (recordingActive) recordingQueue?.offer(pcm.copyOf(count))
+            // Write the exact processed PCM block to the monitor first. Only record
+            // samples accepted by AudioTrack, so the MP3 follows the audible signal.
             var written = 0
             while (written < count && isRunning) {
                 val n = output.write(pcm, written, count - written, AudioTrack.WRITE_BLOCKING)
                 if (n <= 0) break
                 written += n
+            }
+            if (written == count && recordingActive) {
+                // A larger queue absorbs short encoder scheduling delays without
+                // blocking the real-time audio thread. Never silently drop blocks:
+                // that produces gaps/clicks in the MP3.
+                val queue = recordingQueue
+                if (queue != null && !queue.offer(pcm.copyOf(count))) {
+                    recordingError = "Recording stopped: MP3 encoder could not keep up; please record again"
+                    recordingActive = false
+                }
             }
         }
     }
