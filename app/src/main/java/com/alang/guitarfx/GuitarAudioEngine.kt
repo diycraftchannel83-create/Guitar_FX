@@ -93,7 +93,13 @@ class GuitarAudioEngine(private val context: Context) {
         var envelope = 0.0
         while (isRunning && !Thread.currentThread().isInterrupted) {
             val count = input.read(pcm, 0, pcm.size, AudioRecord.READ_BLOCKING)
-            if (count <= 0) continue
+            // A negative read result indicates an audio I/O failure. Exit instead of
+            // spinning at 100% CPU on a disconnected or invalidated input device.
+            if (count < 0) {
+                isRunning = false
+                break
+            }
+            if (count == 0) continue
             val effects = enabledEffects
             val driveGain = drive.coerceIn(1.0f, 8.0f).toDouble()
             for (i in 0 until count) {
