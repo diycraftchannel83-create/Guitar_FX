@@ -23,7 +23,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var engine: GuitarAudioEngine
     private lateinit var status: TextView
     private lateinit var startButton: Button
-    private lateinit var driveValue: TextView
     private lateinit var outputValue: TextView
     private lateinit var outputSeek: SeekBar
     private val active = mutableSetOf("OVERDRIVE")
