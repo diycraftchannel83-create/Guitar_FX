@@ -47,7 +47,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun shape(color: Int, radius: Float = 22f): GradientDrawable =
-        GradientDrawable().apply { setColor(color); cornerRadius = dp(radius).toFloat() }
+        GradientDrawable().apply { setColor(color); cornerRadius = dp(radius.toInt()).toFloat() }
 
     private fun text(value: String, size: Float, color: Int = Color.WHITE, bold: Boolean = false): TextView =
         TextView(this).apply {
